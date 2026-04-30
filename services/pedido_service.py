@@ -96,6 +96,10 @@ class PedidoService:
     @staticmethod
     def _verificar_y_responder(telefono: str) -> str:
         pedido = obtener_pedido_temporal(telefono)
+        
+        if not pedido:
+            return "He recibido tu mensaje, pero no pude procesar los datos. ¿Podrías repetirlos?"
+
         faltantes = []
         
         if not pedido.get('precio'): faltantes.append("precio")

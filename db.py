@@ -11,9 +11,11 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def get_connection():
     """Retorna una conexión a la base de datos PostgreSQL (Supabase)."""
     if DATABASE_URL:
-        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        conn.autocommit = True
+        return conn
     
-    return psycopg2.connect(
+    conn = psycopg2.connect(
         host=os.getenv("DB_HOST", "localhost"),
         user=os.getenv("DB_USER", "postgres"),
         password=os.getenv("DB_PASSWORD", ""),
@@ -21,6 +23,8 @@ def get_connection():
         port=os.getenv("DB_PORT", "5432"),
         cursor_factory=RealDictCursor
     )
+    conn.autocommit = True
+    return conn
 
 def init_db():
     """Crea las tablas necesarias si no existen (Sintaxis PostgreSQL)."""
