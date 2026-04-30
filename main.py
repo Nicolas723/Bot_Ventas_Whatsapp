@@ -1,5 +1,4 @@
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, Form
 from services.pedido_service import PedidoService
 from db import init_db
 import requests
@@ -8,7 +7,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-app = FastAPI(title="WhatsApp Bot Backend")
+app = FastAPI(title="WhatsApp Bot Backend (Twilio)")
+
+# Configuración de Twilio (Cargar desde .env)
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "whatsapp:+14155238886") # Número de Sandbox por defecto
 
 # Initialize DB on startup
 @app.on_event("startup")
@@ -19,94 +23,58 @@ def startup_event():
     except Exception as e:
         print(f"Error al inicializar la base de datos: {e}")
 
-# Configuración de WhatsApp (Cargar desde .env)
-WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
-WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "my_secret_token")
-PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
-
-@app.get("/webhook")
-async def verify_webhook(request: Request):
-    """
-    Endpoint para verificación de WhatsApp Cloud API (Meta).
-    """
-    params = request.query_params
-    mode = params.get("hub.mode")
-    token = params.get("hub.verify_token")
-    challenge = params.get("hub.challenge")
-
-    if mode == "subscribe" and token == WHATSAPP_VERIFY_TOKEN:
-        print("Webhook verificado correctamente.")
-        # Meta espera que devolvamos el challenge como texto/número
-        from fastapi.responses import Response
-        return Response(content=challenge, media_type="text/plain")
-    
-    return {"error": "Token de verificación inválido"}
-
 @app.post("/webhook")
-async def webhook(request: Request):
+async def webhook(From: str = Form(...), Body: str = Form(...)):
     """
-    Recibe los mensajes reales desde la API de WhatsApp de Meta.
+    Endpoint para recibir mensajes de WhatsApp vía Twilio.
+    Twilio envía los datos como Form Data.
     """
-    body = await request.json()
-    
-    # Imprimir body para depuración en Render (opcional)
-    # print(f"Payload recibido: {body}")
-
     try:
-        # Navegar en el JSON de Meta para extraer el mensaje y el teléfono
-        entries = body.get("entry", [])
-        for entry in entries:
-            changes = entry.get("changes", [])
-            for change in changes:
-                value = change.get("value", {})
-                messages = value.get("messages", [])
-                if messages:
-                    message = messages[0]
-                    telefono = message.get("from")
-                    texto = message.get("text", {}).get("body")
+        # Twilio envía el teléfono como 'whatsapp:+521...'
+        telefono = From.replace("whatsapp:", "")
+        texto = Body
 
-                    if texto:
-                        # Procesar lógica del bot
-                        respuesta = PedidoService.procesar_mensaje(telefono, texto)
-                        
-                        # Enviar respuesta de vuelta a WhatsApp
-                        enviar_mensaje_whatsapp(telefono, respuesta)
+        if texto:
+            # Procesar lógica del bot
+            respuesta = PedidoService.procesar_mensaje(telefono, texto)
+            
+            # Enviar respuesta de vuelta vía Twilio
+            enviar_mensaje_twilio(telefono, respuesta)
 
         return {"status": "ok"}
     except Exception as e:
-        print(f"Error procesando webhook de Meta: {e}")
+        print(f"Error procesando webhook de Twilio: {e}")
         return {"status": "error"}
 
-def enviar_mensaje_whatsapp(telefono: str, texto: str):
+def enviar_mensaje_twilio(telefono: str, texto: str):
     """
-    Envía un mensaje de texto de vuelta al usuario vía WhatsApp Cloud API.
+    Envía un mensaje de texto de vuelta al usuario vía la API de Twilio.
     """
-    if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
-        print("Falta configuración de WhatsApp (Token o ID) para enviar mensaje.")
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        print("Falta configuración de Twilio (SID o Token) en .env")
         return
 
-    url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": telefono,
-        "type": "text",
-        "text": {"body": texto}
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+    
+    # Twilio requiere Basic Auth (SID como usuario, Token como contraseña)
+    auth = (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    
+    data = {
+        "From": TWILIO_PHONE_NUMBER,
+        "To": f"whatsapp:{telefono}",
+        "Body": texto
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload)
-        if response.status_code != 200:
-            print(f"Error al enviar mensaje a WhatsApp: {response.text}")
+        response = requests.post(url, data=data, auth=auth)
+        if response.status_code not in [200, 201]:
+            print(f"Error al enviar mensaje vía Twilio: {response.text}")
     except Exception as e:
-        print(f"Error en la petición a Meta: {e}")
+        print(f"Error en la petición a Twilio: {e}")
 
 @app.get("/")
 def read_root():
-    return {"status": "Bot is running and ready for WhatsApp Cloud API"}
+    return {"status": "Bot is running and ready for Twilio WhatsApp Sandbox"}
 
 if __name__ == "__main__":
     import uvicorn
