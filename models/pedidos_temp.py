@@ -32,8 +32,8 @@ def actualizar_pedido_temporal(telefono: str, datos: dict):
                     cursor.execute(query, tuple(values))
             else:
                 cursor.execute(
-                    "INSERT INTO pedidos_temp (telefono, precio, tienda, origen) VALUES (%s, %s, %s, %s)",
-                    (telefono, datos.get('precio'), datos.get('tienda'), datos.get('origen'))
+                    "INSERT INTO pedidos_temp (telefono, precio, tienda, origen, metodo_envio) VALUES (%s, %s, %s, %s, %s)",
+                    (telefono, datos.get('precio'), datos.get('tienda'), datos.get('origen'), datos.get('metodo_envio'))
                 )
     finally:
         conn.close()

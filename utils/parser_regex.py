@@ -3,27 +3,50 @@ import re
 def extraer_con_regex(texto: str) -> dict:
     """
     Intenta extraer precio, tienda y origen usando expresiones regulares.
-    Ejemplo: "Pedido de 500 en tienda Norte desde web"
+    Soporta formatos colombianos de precio (20.000, $20.000, 1.500.000).
+    Ejemplo: "Pedido de $20.000 en tienda Norte desde Soacha"
     """
     datos = {
         "precio": None,
         "tienda": None,
-        "origen": None
+        "origen": None,
+        "metodo_envio": None
     }
     
-    # Buscar precio (números que parezcan dinero)
-    precio_match = re.search(r'\b(\d+(?:\.\d{1,2})?)\b', texto)
+    # Buscar precio - Soporta formatos colombianos:
+    # "$20.000", "20.000", "20000", "$1.500.000", "1500000"
+    precio_match = re.search(
+        r'\$?\s*(\d{1,3}(?:\.\d{3})+|\d{4,})', 
+        texto
+    )
     if precio_match:
-        datos["precio"] = float(precio_match.group(1))
+        precio_str = precio_match.group(1).replace(".", "")
+        datos["precio"] = int(precio_str)
     
-    # Buscar tienda (palabra después de "tienda")
-    tienda_match = re.search(r'tienda\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+)', texto, re.IGNORECASE)
+    # Buscar tienda (después de: tienda, local, sucursal, sede, punto)
+    tienda_match = re.search(
+        r'(?:tienda|local|sucursal|sede|punto)\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s]+?)(?:\s+(?:origen|desde|procedencia|viene)|$|,)',
+        texto, re.IGNORECASE
+    )
     if tienda_match:
-        datos["tienda"] = tienda_match.group(1).capitalize()
+        datos["tienda"] = tienda_match.group(1).strip().title()
         
-    # Buscar origen (palabra después de "origen" o "desde")
-    origen_match = re.search(r'(?:origen|desde)\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ]+)', texto, re.IGNORECASE)
+    # Buscar origen (después de: origen, desde, procedencia, viene de)
+    origen_match = re.search(
+        r'(?:origen|desde|procedencia|viene\s+de)\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s]+?)(?:\s+(?:tienda|local|sucursal|sede|punto)|$|,)',
+        texto, re.IGNORECASE
+    )
     if origen_match:
-        datos["origen"] = origen_match.group(1).capitalize()
-        
+        datos["origen"] = origen_match.group(1).strip().title()
+
+    # Buscar metodo de envio (ruta, bicicleta, envio, recoger)
+    metodo_match = re.search(r'\b(ruta|bicicleta|envio|envío|recoger)\b', texto, re.IGNORECASE)
+    if metodo_match:
+        metodo = metodo_match.group(1).lower()
+        if metodo == 'envío':
+            metodo = 'envio'
+        if metodo == 'recoger':
+            metodo = 'recoger en tienda'
+        datos["metodo_envio"] = metodo
+
     return datos

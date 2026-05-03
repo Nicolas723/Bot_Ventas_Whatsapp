@@ -12,3 +12,7 @@ class EstadoService:
     @staticmethod
     def cambiar_a_confirmacion(telefono: str):
         actualizar_estado_usuario(telefono, 'confirmacion')
+
+    @staticmethod
+    def cambiar_estado(telefono: str, nuevo_estado: str):
+        actualizar_estado_usuario(telefono, nuevo_estado)

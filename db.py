@@ -62,5 +62,10 @@ def init_db():
                     origen VARCHAR(100)
                 )
             """)
+            
+            # ── Migraciones: agregar columnas nuevas (safe) ──
+            cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre VARCHAR(100)")
+            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metodo_envio VARCHAR(50)")
+            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS metodo_envio VARCHAR(50)")
     finally:
         conn.close()
