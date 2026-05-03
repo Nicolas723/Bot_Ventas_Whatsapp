@@ -25,7 +25,7 @@ def extraer_con_regex(texto: str) -> dict:
     
     # Buscar tienda (después de: tienda, local, sucursal, sede, punto)
     tienda_match = re.search(
-        r'(?:tienda|local|sucursal|sede|punto)\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s]+?)(?:\s+(?:origen|desde|procedencia|viene)|$|,)',
+        r'(?:tienda|local|sucursal|sede|punto)\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+?)(?:\s+(?:origen|desde|procedencia|viene)|$|,|\n)',
         texto, re.IGNORECASE
     )
     if tienda_match:
@@ -33,7 +33,7 @@ def extraer_con_regex(texto: str) -> dict:
         
     # Buscar origen (después de: origen, desde, procedencia, viene de)
     origen_match = re.search(
-        r'(?:origen|desde|procedencia|viene\s+de)\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s]+?)(?:\s+(?:tienda|local|sucursal|sede|punto)|$|,)',
+        r'(?:origen|desde|procedencia|viene\s+de)\s+([a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]+?)(?:\s+(?:tienda|local|sucursal|sede|punto|ruta|bicicleta|envio|envío|recoger)|$|,|\n)',
         texto, re.IGNORECASE
     )
     if origen_match:

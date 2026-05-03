@@ -36,7 +36,7 @@ def _llamar_ia(prompt: str) -> str | None:
     }
     
     data = {
-        "model": "llama-3.1-8b-instant", # Modelo rapidísimo y excelente para extraer JSON
+        "model": "llama-3.3-70b-versatile", # Modelo mucho más potente y capaz
         "messages": [
             {"role": "user", "content": prompt}
         ],
@@ -70,51 +70,98 @@ def _llamar_ia(prompt: str) -> str | None:
     return None
 
 
-def interpretar_con_ia(texto: str) -> dict:
+def interpretar_con_ia(texto: str, pedido_actual: dict = None) -> dict:
     """
-    Usa Google Gemini para interpretar texto natural y extraer precio, tienda, origen y metodo_envio.
-    Entiende variaciones como:
-    - Precio: "20 mil", "veinte mil", "$20.000", "por 20000", etc.
-    - Tienda: "local norte", "sucursal centro", "sede sur", "punto calle 80", etc.
-    - Origen: "viene de Soacha", "procedencia Bogotá", "desde Kennedy", etc.
-    - Metodo: "ruta", "bici", "envio", "recoger", etc.
+    Usa Groq para interpretar pedidos. Si se pasa pedido_actual, lo usa como contexto
+    para no sobrescribir datos correctos con ambigüedades.
     """
-    prompt = f"""Eres un asistente que extrae datos de pedidos de mensajes de WhatsApp de un negocio en Colombia.
+    contexto = ""
+    # Obtener fecha actual para referencia de la IA
+    from datetime import datetime, timedelta
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    nombre_dia_hoy = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"][datetime.now().weekday()]
 
-Del siguiente mensaje, extrae estos 4 campos:
-- precio: el valor numérico del pedido en pesos colombianos. Solo el número entero, sin símbolos, sin puntos de miles, sin decimales. Si dice "20 mil" interpreta como 20000. Si dice "20.000" interpreta como 20000. Si dice "un millón" interpreta como 1000000.
-- tienda: el nombre de la tienda, local, sucursal, sede, punto de venta, almacén o lugar de destino del pedido. Capitaliza la primera letra de cada palabra.
-- origen: el origen, procedencia, ciudad, barrio, localidad de donde viene el pedido o de donde es la venta. Capitaliza la primera letra. OJO: extrae ÚNICAMENTE el nombre. Si el usuario dice "el origen es whatsapp" o "es whatsapp", el valor debe ser SOLO "Whatsapp".
-- metodo_envio: el método de entrega del pedido. Debe ser ESTRICTAMENTE uno de estos 4 valores: "ruta", "bicicleta", "envio", "recoger en tienda". Infiere el valor según el contexto del mensaje (ej. "bici" -> "bicicleta", "paso por el" -> "recoger en tienda").
+    contexto = ""
+    if pedido_actual:
+        contexto = f"""
+FECHA ACTUAL: {fecha_hoy} ({nombre_dia_hoy})
 
-REGLAS:
-- Si no puedes identificar algún dato con certeza, pon null.
-- No inventes datos que no están en el mensaje.
-- Responde ÚNICAMENTE con un JSON válido, sin markdown, sin explicaciones, sin texto adicional.
+CONTEXTO DEL PEDIDO ACTUAL (lo que ya sabemos):
+- Precio Total: {pedido_actual.get('precio') or 'Pendiente'}
+- Cliente: {pedido_actual.get('cliente') or 'Pendiente'}
+- Bodega: {pedido_actual.get('bodega') or 'Pendiente'}
+- Método Envío: {pedido_actual.get('metodo_envio') or 'Pendiente'}
+- Fecha Entrega: {pedido_actual.get('fecha_entrega') or 'Pendiente'}
+- Productos: {pedido_actual.get('productos') or 'Pendiente'}
 
-Formato exacto de respuesta:
-{{"precio": number|null, "tienda": string|null, "origen": string|null, "metodo_envio": string|null}}
+El usuario está completando los datos faltantes o corrigiendo.
+"""
 
-Mensaje del usuario: "{texto}"
+    prompt = f"""Eres un experto en extracción de datos para una ferretería. 
+{contexto}
+
+REGLAS DE PRECIO:
+1. SI DICE "$ X" o "X pesos" (sin "cada uno"): Es el TOTAL de esa línea. Divide X entre la cantidad para sacar el precio_unitario.
+   Ejemplo: "3 neutral oak $ 240.000" -> precio_unitario: 80000.
+2. SI DICE "a X", "@ X", "X cada uno", "X c/u": X es el precio_unitario.
+   Ejemplo: "3 neutral oak a $ 240.000" -> precio_unitario: 240000.
+3. SI NO ES CLARO: Asume que el valor es el TOTAL de la cantidad.
+
+REGLAS DE FECHA:
+- Si dice "hoy", "mañana", "lunes", etc., calcula la fecha real basándote en que hoy es {fecha_hoy} ({nombre_dia_hoy}).
+- Formato: YYYY-MM-DD.
+
+EJEMPLOS:
+- "Jhon, 3 laminas 300k, Soacha, ruta, para el lunes"
+  -> {{"cliente": "Jhon", "bodega": "Soacha", "metodo_envio": "ruta", "fecha_entrega": "YYYY-MM-DD (del lunes)", "lista_productos": [{{"cantidad": 3, "descripcion": "laminas", "precio_unitario": 100000}}]}}
+
+NUEVO MENSAJE: "{texto}"
+
+Responde SOLO el JSON:
+{{
+  "cliente": string|null,
+  "bodega": string|null,
+  "metodo_envio": string|null,
+  "fecha_entrega": string|null,
+  "lista_productos": [
+    {{"cantidad": number, "descripcion": string, "precio_unitario": number}}
+  ]
+}}
 """
 
     raw = _llamar_ia(prompt)
     if not raw:
-        return {"precio": None, "tienda": None, "origen": None, "metodo_envio": None}
+        return {"precio": None, "cliente": None, "bodega": None, "metodo_envio": None, "fecha_entrega": None, "productos": None}
 
     try:
         result = json.loads(_limpiar_json(raw))
+        
+        # Calcular el precio total y formatear los productos en Python para evitar errores de la IA
+        total_acumulado = 0
+        productos_formateados = []
+        
+        if result.get("lista_productos"):
+            for p in result["lista_productos"]:
+                cant = p.get("cantidad", 1)
+                p_unit = p.get("precio_unitario", 0)
+                desc = p.get("descripcion", "Producto")
+                subtotal = cant * p_unit
+                total_acumulado += subtotal
+                productos_formateados.append(f"{cant} {desc} - ${subtotal:,}".replace(",", "."))
+
         datos = {
-            "precio": int(result["precio"]) if result.get("precio") is not None else None,
-            "tienda": result.get("tienda"),
-            "origen": result.get("origen"),
-            "metodo_envio": result.get("metodo_envio")
+            "precio": total_acumulado if total_acumulado > 0 else None,
+            "cliente": result.get("cliente"),
+            "bodega": result.get("bodega"),
+            "metodo_envio": result.get("metodo_envio"),
+            "fecha_entrega": result.get("fecha_entrega"),
+            "productos": "\n".join(productos_formateados) if productos_formateados else None
         }
         print(f"  [IA] Datos extraídos: {datos}")
         return datos
     except Exception as e:
         print(f"Error parseando respuesta de IA: {e} | Raw: {raw}")
-        return {"precio": None, "tienda": None, "origen": None, "metodo_envio": None}
+        return {"precio": None, "cliente": None, "bodega": None, "metodo_envio": None, "productos": None}
 
 
 # =============================================================================
@@ -202,16 +249,9 @@ def _fallback_detectar_modificacion(texto: str) -> dict:
 
 def detectar_modificacion(texto: str, pedido_actual: dict) -> dict:
     """
-    Usa Gemini para detectar si el usuario quiere modificar, confirmar o cancelar
-    durante la fase de confirmación del pedido.
-    Con fallback inteligente de regex si la API falla.
-    
-    Retorna:
-    - {"accion": "confirmar"} si el usuario acepta
-    - {"accion": "cancelar"} si el usuario rechaza
-    - {"accion": "modificar", "precio": ..., "tienda": ..., "origen": ...} si quiere cambiar algo
+    Usa IA para detectar si el usuario quiere modificar, confirmar o cancelar.
     """
-    # Primero: intentar fallback rápido para casos obvios (ahorra llamadas a API)
+    # Primero: intentar fallback rápido para casos obvios
     texto_lower = texto.lower().strip()
     if texto_lower in _PALABRAS_CONFIRMAR:
         return {"accion": "confirmar"}
@@ -219,42 +259,83 @@ def detectar_modificacion(texto: str, pedido_actual: dict) -> dict:
         return {"accion": "cancelar"}
 
     # Segundo: intentar con IA
-    prompt = f"""Eres un asistente de pedidos por WhatsApp de un negocio en Colombia.
+    prompt = f"""Eres un experto en corregir pedidos de ferretería. 
+HOY ES: {datetime.now().strftime("%Y-%m-%d")}
 
-El usuario tiene un pedido pendiente de confirmación con estos datos:
-- Precio: {pedido_actual.get('precio')} pesos
-- Tienda: {pedido_actual.get('tienda')}
-- Origen: {pedido_actual.get('origen')}
-- Metodo Envio: {pedido_actual.get('metodo_envio')}
+PEDIDO ACTUAL:
+- Cliente: {pedido_actual.get('cliente')}
+- Productos: {pedido_actual.get('productos')}
+- Fecha actual del pedido: {pedido_actual.get('fecha_entrega')}
 
-El usuario respondió con este mensaje en lugar de solo "sí" o "no":
-"{texto}"
+MENSAJE DEL USUARIO: "{texto}"
 
-Determina la INTENCIÓN del usuario:
+REGLAS:
+1. SI MODIFICA PRODUCTOS: Devuelve la lista COMPLETA de productos actualizada en 'lista_productos'.
+2. PRECIOS: Si el usuario dice "3 neutral oak $ 240.000", el precio unitario es 80000. SOLO multiplica si dice "cada una".
+3. FECHA: Si el usuario menciona una nueva fecha (ej: "para el lunes"), devuélvela en 'fecha_entrega'.
+4. SOLO CAMBIOS: Devuelve valor SOLO para los campos que cambian. El resto null.
 
-1. CONFIRMAR: si el usuario acepta el pedido (ejemplos: "sí", "dale", "correcto", "confirmo", "está bien", "ok", "perfecto", "eso es")
-2. CANCELAR: si el usuario rechaza completamente (ejemplos: "no", "cancelar", "anular", "no quiero", "descarta")
-3. MODIFICAR: si el usuario quiere cambiar algún dato específico (ejemplos: "tienda norte", "cambia el precio a 30000", "origen Bogotá", "no, es tienda centro", "es para envio")
-
-Para MODIFICAR: pon el nuevo valor SOLO en los campos que cambian. Los que no cambian van en null.
-El precio debe ser un número entero sin puntos ni símbolos.
-El metodo_envio debe ser "ruta", "bicicleta", "envio", o "recoger en tienda" (o null).
-
-Responde SOLO con JSON válido, sin markdown ni explicaciones:
-- Confirmar: {{"accion": "confirmar"}}
-- Cancelar: {{"accion": "cancelar"}}
-- Modificar: {{"accion": "modificar", "precio": number|null, "tienda": string|null, "origen": string|null, "metodo_envio": string|null}}
+Responde SOLO el JSON:
+{{
+  "accion": "confirmar" | "cancelar" | "modificar",
+  "cliente": string|null,
+  "bodega": string|null,
+  "metodo_envio": string|null,
+  "fecha_entrega": string|null,
+  "lista_productos": [
+    {{"cantidad": number, "descripcion": string, "precio_unitario": number}}
+  ] | null
+}}
 """
 
     raw = _llamar_ia(prompt)
     if raw:
         try:
             result = json.loads(_limpiar_json(raw))
+            
+            if result.get("accion") == "modificar":
+                # Recalcular precio y formatear productos si hubo cambios en la lista
+                if result.get("lista_productos"):
+                    total_acumulado = 0
+                    productos_formateados = []
+                    for p in result["lista_productos"]:
+                        cant = p.get("cantidad", 1)
+                        p_unit = p.get("precio_unitario", 0)
+                        desc = p.get("descripcion", "Producto")
+                        subtotal = cant * p_unit
+                        total_acumulado += subtotal
+                        productos_formateados.append(f"{cant} {desc} - ${subtotal:,}".replace(",", "."))
+                    
+                    result["precio"] = total_acumulado
+                    result["productos"] = "\n".join(productos_formateados)
+            
             print(f"  [IA] Intención detectada: {result}")
             return result
         except Exception as e:
             print(f"Error parseando respuesta de IA: {e} | Raw: {raw}")
 
-    # Tercero: fallback con regex si la IA falla
+    # Tercero: fallback con regex
     print("  [IA] Usando fallback regex para detección de modificación...")
     return _fallback_detectar_modificacion(texto)
+def extraer_fecha_con_ia(texto: str) -> str | None:
+    """Extrae una fecha en formato YYYY-MM-DD del texto usando IA."""
+    from datetime import datetime
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    nombre_dia_hoy = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"][datetime.now().weekday()]
+
+    prompt = f"""Extrae la fecha mencionada en el siguiente texto y devuélvela en formato YYYY-MM-DD.
+HOY ES: {fecha_hoy} ({nombre_dia_hoy})
+
+TEXTO: "{texto}"
+
+Responde SOLO el JSON:
+{{"fecha": "YYYY-MM-DD" | null}}
+"""
+    raw = _llamar_ia(prompt)
+    if raw:
+        try:
+            result = json.loads(_limpiar_json(raw))
+            return result.get("fecha")
+        except:
+            return None
+    return None

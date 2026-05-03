@@ -23,6 +23,8 @@ def actualizar_pedido_temporal(telefono: str, datos: dict):
                 values = []
                 for k, v in datos.items():
                     if v is not None:
+                        if isinstance(v, str) and k != 'productos':
+                            v = v.replace('\n', ' ').replace('\r', '').strip()
                         fields.append(f"{k} = %s")
                         values.append(v)
                 
@@ -31,9 +33,15 @@ def actualizar_pedido_temporal(telefono: str, datos: dict):
                     values.append(telefono)
                     cursor.execute(query, tuple(values))
             else:
+                precio = datos.get('precio')
+                cliente = datos.get('cliente').replace('\n', ' ').strip() if isinstance(datos.get('cliente'), str) else datos.get('cliente')
+                bodega = datos.get('bodega').replace('\n', ' ').strip() if isinstance(datos.get('bodega'), str) else datos.get('bodega')
+                metodo_envio = datos.get('metodo_envio').replace('\n', ' ').strip() if isinstance(datos.get('metodo_envio'), str) else datos.get('metodo_envio')
+                productos = datos.get('productos')
+                
                 cursor.execute(
-                    "INSERT INTO pedidos_temp (telefono, precio, tienda, origen, metodo_envio) VALUES (%s, %s, %s, %s, %s)",
-                    (telefono, datos.get('precio'), datos.get('tienda'), datos.get('origen'), datos.get('metodo_envio'))
+                    "INSERT INTO pedidos_temp (telefono, precio, cliente, bodega, metodo_envio, productos) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (telefono, precio, cliente, bodega, metodo_envio, productos)
                 )
     finally:
         conn.close()

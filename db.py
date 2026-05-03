@@ -46,7 +46,7 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS pedidos (
                     id SERIAL PRIMARY KEY,
                     telefono VARCHAR(20) NOT NULL,
-                    precio DECIMAL(10, 2),
+                    precio DECIMAL(20, 2),
                     tienda VARCHAR(100),
                     origen VARCHAR(100),
                     fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -57,7 +57,7 @@ def init_db():
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pedidos_temp (
                     telefono VARCHAR(20) PRIMARY KEY,
-                    precio DECIMAL(10, 2),
+                    precio DECIMAL(20, 2),
                     tienda VARCHAR(100),
                     origen VARCHAR(100)
                 )
@@ -67,5 +67,22 @@ def init_db():
             cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre VARCHAR(100)")
             cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metodo_envio VARCHAR(50)")
             cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS metodo_envio VARCHAR(50)")
+            
+            # Nuevas columnas para la estructura solicitada
+            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS productos TEXT")
+            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente VARCHAR(255)")
+            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS bodega VARCHAR(100)")
+            
+            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS productos TEXT")
+            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS cliente VARCHAR(255)")
+            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS bodega VARCHAR(100)")
+            
+            # Asegurar que la columna 'precio' existe y tiene mayor precisión
+            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio DECIMAL(20, 2)")
+            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS precio DECIMAL(20, 2)")
+            
+            # Forzar cambio de tipo si ya existe
+            cursor.execute("ALTER TABLE pedidos ALTER COLUMN precio TYPE DECIMAL(20, 2)")
+            cursor.execute("ALTER TABLE pedidos_temp ALTER COLUMN precio TYPE DECIMAL(20, 2)")
     finally:
         conn.close()

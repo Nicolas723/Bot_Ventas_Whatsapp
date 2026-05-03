@@ -48,25 +48,33 @@ async def webhook(request: Request):
             if key.get("fromMe"):
                 return {"status": "ok"}
 
-            # Extraer teléfono
+            # Extraer teléfono / remoteJid
             remoteJid = key.get("remoteJid", "")
-            
-            # IGNORAR MENSAJES DE GRUPOS
-            if "@g.us" in remoteJid:
-                return {"status": "ok"}
-                
-            telefono = remoteJid.split("@")[0]
             
             # Extraer texto (puede venir en conversation o extendedTextMessage)
             msg_content = mensaje_data.get("message", {})
             texto = msg_content.get("conversation") or msg_content.get("extendedTextMessage", {}).get("text") or ""
             
-            if texto:
-                # Procesar lógica del bot
-                respuesta = PedidoService.procesar_mensaje(telefono, texto)
+            if not texto:
+                return {"status": "ok"}
+
+            # TRATAMIENTO DE GRUPOS
+            if "@g.us" in remoteJid:
+                if texto.lower().strip() == "pedido":
+                    respuesta_grupo = PedidoService.procesar_mensaje_grupo(remoteJid)
+                    # Enviar al grupo (o dejar que el service lo envíe)
+                    # En este caso, el service ya lo envía al grupo de reportes, 
+                    # pero si queremos responder al MISMO grupo:
+                    # enviar_mensaje_evolution_jid(remoteJid, respuesta_grupo)
+                return {"status": "ok"}
                 
-                # Enviar respuesta de vuelta vía Evolution API
-                enviar_mensaje_evolution(telefono, respuesta)
+            telefono = remoteJid.split("@")[0]
+            
+            # Procesar lógica del bot en privado
+            respuesta = PedidoService.procesar_mensaje(telefono, texto)
+            
+            # Enviar respuesta de vuelta vía Evolution API
+            enviar_mensaje_evolution(telefono, respuesta)
 
         return {"status": "ok"}
     except Exception as e:
