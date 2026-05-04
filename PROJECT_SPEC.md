@@ -1,9 +1,9 @@
-# Especificación del Proyecto: Bot de Ventas WhatsApp (Ferretería)
+# Especificación del Proyecto: Bot de Ventas WhatsApp - Laminados Beka
 
-Este documento describe la arquitectura, lógica y flujo del bot de gestión de pedidos para una ferretería, diseñado para ser procesado por otra IA de gestión documental.
+Este documento describe la arquitectura, lógica y flujo del bot de gestión de pedidos para **Laminados Beka**, especialistas en láminas, formicas y materiales para carpintería.
 
 ## 1. Visión General
-El bot automatiza la captura de pedidos a través de WhatsApp, procesando lenguaje natural para extraer datos estructurados y guardarlos en una base de datos PostgreSQL (Supabase).
+El bot automatiza la captura de pedidos de láminas y materiales afines a través de WhatsApp, procesando lenguaje natural para extraer datos estructurados y guardarlos en una base de datos PostgreSQL (Supabase).
 
 ## 2. Stack Tecnológico
 - **Backend**: Python 3.10+ con FastAPI.

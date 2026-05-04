@@ -97,15 +97,14 @@ CONTEXTO DEL PEDIDO ACTUAL (lo que ya sabemos):
 El usuario está completando los datos faltantes o corrigiendo.
 """
 
-    prompt = f"""Eres un experto en extracción de datos para una ferretería. 
+    prompt = f"""Eres un experto en extracción de datos para "Laminados Beka", una empresa líder en venta de láminas, formicas, pegantes y herrajes. 
 {contexto}
 
 REGLAS DE PRECIO:
-1. SI DICE "$ X" o "X pesos" (sin "cada uno"): Es el TOTAL de esa línea. Divide X entre la cantidad para sacar el precio_unitario.
-   Ejemplo: "3 neutral oak $ 240.000" -> precio_unitario: 80000.
-2. SI DICE "a X", "@ X", "X cada uno", "X c/u": X es el precio_unitario.
-   Ejemplo: "3 neutral oak a $ 240.000" -> precio_unitario: 240000.
-3. SI NO ES CLARO: Asume que el valor es el TOTAL de la cantidad.
+1. ¡SIEMPRE ES VALOR UNITARIO!: Cualquier precio que el usuario mencione junto a un producto es el precio de UNA unidad.
+   Ejemplo: "3 laminas 200k" -> precio_unitario: 200000. (Total será 600000).
+2. NO DIVIDIR: Nunca intentes dividir el precio entre la cantidad.
+3. PRECIO TOTAL: El sistema calculará el total automáticamente multiplicando Cantidad x Precio Unitario.
 
 REGLAS DE FECHA:
 - Si dice "hoy", "mañana", "lunes", etc., calcula la fecha real basándote en que hoy es {fecha_hoy} ({nombre_dia_hoy}).
@@ -147,7 +146,8 @@ Responde SOLO el JSON:
                 desc = p.get("descripcion", "Producto")
                 subtotal = cant * p_unit
                 total_acumulado += subtotal
-                productos_formateados.append(f"{cant} {desc} - ${subtotal:,}".replace(",", "."))
+                # Mostrar el precio unitario claramente en el resumen
+                productos_formateados.append(f"{cant} {desc} - {formatear_precio(p_unit)} c/u (Total: {formatear_precio(subtotal)})")
 
         datos = {
             "precio": total_acumulado if total_acumulado > 0 else None,
@@ -259,7 +259,7 @@ def detectar_modificacion(texto: str, pedido_actual: dict) -> dict:
         return {"accion": "cancelar"}
 
     # Segundo: intentar con IA
-    prompt = f"""Eres un experto en corregir pedidos de ferretería. 
+    prompt = f"""Eres un experto en corregir pedidos para "Laminados Beka" (especialistas en láminas y formicas). 
 HOY ES: {datetime.now().strftime("%Y-%m-%d")}
 
 PEDIDO ACTUAL:
@@ -271,7 +271,7 @@ MENSAJE DEL USUARIO: "{texto}"
 
 REGLAS:
 1. SI MODIFICA PRODUCTOS: Devuelve la lista COMPLETA de productos actualizada en 'lista_productos'.
-2. PRECIOS: Si el usuario dice "3 neutral oak $ 240.000", el precio unitario es 80000. SOLO multiplica si dice "cada una".
+2. PRECIOS: ¡SIEMPRE ES VALOR UNITARIO! Si dice "3 laminas 100k", el precio unitario es 100000.
 3. FECHA: Si el usuario menciona una nueva fecha (ej: "para el lunes"), devuélvela en 'fecha_entrega'.
 4. SOLO CAMBIOS: Devuelve valor SOLO para los campos que cambian. El resto null.
 
@@ -304,7 +304,7 @@ Responde SOLO el JSON:
                         desc = p.get("descripcion", "Producto")
                         subtotal = cant * p_unit
                         total_acumulado += subtotal
-                        productos_formateados.append(f"{cant} {desc} - ${subtotal:,}".replace(",", "."))
+                        productos_formateados.append(f"{cant} {desc} - {formatear_precio(p_unit)} c/u (Total: {formatear_precio(subtotal)})")
                     
                     result["precio"] = total_acumulado
                     result["productos"] = "\n".join(productos_formateados)
