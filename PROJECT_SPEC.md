@@ -7,12 +7,22 @@ El bot automatiza la captura de pedidos de láminas y materiales afines a travé
 
 ## 2. Stack Tecnológico
 - **Backend**: Python 3.10+ con FastAPI.
-- **Base de Datos**: PostgreSQL (Supabase) para persistencia de usuarios, pedidos y configuraciones.
-- **IA (NLP)**: Modelos Llama-3 (vía Groq) y Gemini para extracción de entidades y detección de intenciones.
+- **Base de Datos**: PostgreSQL para persistencia.
+- **Caché/Sesiones**: Redis (utilizado por Evolution API).
+- **IA (NLP)**: Modelos Llama-3 (vía Groq) y Gemini.
 - **Integración WhatsApp**: Evolution API (basada en Baileys).
-- **Servidor**: Render / Local con Docker.
 
-## 3. Lógica de Negocio Crítica
+## 3. Infraestructura y Despliegue (Docker Full)
+El proyecto está diseñado para ejecutarse íntegramente en un entorno de **Docker**, utilizando **Docker Compose** para la orquestación de microservicios:
+
+1.  **Contenedor `bot_app`**: Ejecuta el backend de FastAPI que procesa los webhooks y la lógica de negocio de Laminados Beka.
+2.  **Contenedor `evolution_api`**: Gestiona la conexión con WhatsApp y proporciona la interfaz API para enviar mensajes.
+3.  **Contenedor `postgres_db`**: Base de datos relacional para usuarios, pedidos y configuraciones.
+4.  **Contenedor `redis_cache`**: Soporte para la gestión de sesiones y colas de mensajes de Evolution API.
+
+Este enfoque garantiza la portabilidad total entre entornos de desarrollo local y servidores de producción (VPS/Render).
+
+## 4. Lógica de Negocio Crítica
 
 ### A. Extracción de Pedidos
 - **Precio Unitario Prioritario**: Cualquier valor numérico asociado a un producto se trata estrictamente como **Precio Unitario**. El sistema calcula el total multiplicando `cantidad * precio_unitario`.
@@ -33,15 +43,15 @@ El bot automatiza la captura de pedidos de láminas y materiales afines a travé
   - `desbloquear [fecha]`: Habilita la fecha nuevamente.
 - **Reporte Grupal**: Al escribir "pedido" en un grupo de WhatsApp, el bot envía un resumen consolidado de los pedidos cuya `fecha_entrega` es el día actual.
 
-## 4. Estructura de Datos (Tablas Clave)
+## 5. Estructura de Datos (Tablas Clave)
 - `usuarios`: `telefono`, `nombre`, `estado`.
 - `pedidos`: `cliente`, `precio` (total), `bodega`, `metodo_envio`, `productos` (texto formateado), `fecha_entrega`.
 - `fechas_bloqueadas`: `fecha` (DATE).
 
-## 5. Próximos Pasos (Hoja de Ruta)
+## 6. Próximos Pasos (Hoja de Ruta)
 - **Base de Datos de Tiendas**: Crear tabla `tiendas` con `nombre`, `direccion`, `geolocalizacion` y `horarios`.
 - **Validación Geográfica**: Validar si la bodega seleccionada tiene cobertura para el método de envío elegido.
 - **Integración de Facturación**: Exportar pedidos confirmados a un sistema contable vía API.
 
-## 6. Instrucciones para la IA de Documentación
+## 7. Instrucciones para la IA de Documentación
 Al analizar este código, prioriza siempre el archivo `services/pedido_service.py` para la lógica de flujo y `utils/parser_ia.py` para las reglas de extracción de precios y fechas. El sistema debe mantener la integridad de los precios unitarios en todo momento.
