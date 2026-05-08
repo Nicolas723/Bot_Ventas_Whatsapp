@@ -1,57 +1,62 @@
-# Especificación del Proyecto: Bot de Ventas WhatsApp - Laminados Beka
+# Especificación del Proyecto: BekaBot v3.0 - Gestión de Ventas WhatsApp
 
-Este documento describe la arquitectura, lógica y flujo del bot de gestión de pedidos para **Laminados Beka**, especialistas en láminas, formicas y materiales para carpintería.
+BekaBot es un ecosistema inteligente diseñado para **Laminados Beka**, que transforma una conversación de WhatsApp en un potente sistema de gestión de pedidos y control de equipo de ventas.
 
-## 1. Visión General
-El bot automatiza la captura de pedidos de láminas y materiales afines a través de WhatsApp, procesando lenguaje natural para extraer datos estructurados y guardarlos en una base de datos PostgreSQL (Supabase).
+---
 
-## 2. Stack Tecnológico
-- **Backend**: Python 3.10+ con FastAPI.
-- **Base de Datos**: PostgreSQL para persistencia.
-- **Caché/Sesiones**: Redis (utilizado por Evolution API).
-- **IA (NLP)**: Modelos Llama-3 (vía Groq) y Gemini.
-- **Integración WhatsApp**: Evolution API (basada en Baileys).
+## 1. Visión para el Cliente (¿Qué hace el bot?)
 
-## 3. Infraestructura y Despliegue (Docker Full)
-El proyecto está diseñado para ejecutarse íntegramente en un entorno de **Docker**, utilizando **Docker Compose** para la orquestación de microservicios:
+El bot actúa como un asistente de ventas 24/7 que organiza la operación de la empresa de la siguiente manera:
 
-1.  **Contenedor `bot_app`**: Ejecuta el backend de FastAPI que procesa los webhooks y la lógica de negocio de Laminados Beka.
-2.  **Contenedor `evolution_api`**: Gestiona la conexión con WhatsApp y proporciona la interfaz API para enviar mensajes.
-3.  **Contenedor `postgres_db`**: Base de datos relacional para usuarios, pedidos y configuraciones.
-4.  **Contenedor `redis_cache`**: Soporte para la gestión de sesiones y colas de mensajes de Evolution API.
+### 🚀 Flujo del Vendedor
+*   **Registro Automático**: La primera vez que un vendedor escribe, el bot le da la bienvenida y registra su nombre para que todos sus pedidos estén identificados.
+*   **Captura Inteligente**: El vendedor envía un mensaje natural (ej: *"3 láminas blancas 200k para Juan en Chía ruta lunes"*). La IA extrae productos, precios, bodega, cliente y fecha automáticamente.
+*   **Confirmación Asistida**: El bot presenta un resumen profesional y permite confirmar o corregir simplemente respondiendo con números (**1** para sí, **2** para no).
+*   **Gestión de Pedidos**: Los vendedores pueden ver sus pedidos pendientes y modificarlos de forma guiada eligiendo el ID de una lista.
 
-Este enfoque garantiza la portabilidad total entre entornos de desarrollo local y servidores de producción (VPS/Render).
+### 📢 Comunicación Grupal
+*   **Reportes en Tiempo Real**: Cada vez que un pedido se confirma, el bot envía automáticamente una lista actualizada de todos los pedidos del día al grupo principal de WhatsApp de la empresa.
 
-## 4. Lógica de Negocio Crítica
+### 🕵️‍♂️ Control Administrativo (Solo Admins)
+*   **Reporte Global**: Con un solo número, el administrador ve qué ha vendido cada persona del equipo en el día.
+*   **Gestión de Usuarios**: El administrador puede autorizar nuevos vendedores, bloquear accesos o promover a otros a administradores mediante comandos de texto sencillos.
 
-### A. Extracción de Pedidos
-- **Precio Unitario Prioritario**: Cualquier valor numérico asociado a un producto se trata estrictamente como **Precio Unitario**. El sistema calcula el total multiplicando `cantidad * precio_unitario`.
-- **Detección de Datos**: Extrae Cliente, Productos, Bodega, Método de Envío y Fecha de Entrega.
-- **Manejo de Fechas**: Soporta lenguaje relativo ("hoy", "mañana", "lunes") traduciéndolo a formato `YYYY-MM-DD`.
+---
 
-### B. Estados de Conversación
-1. `nuevo`: Usuario no registrado.
-2. `esperando_nombre`: Captura del nombre del vendedor.
-3. `inicio`: Estado listo para recibir datos de pedido.
-4. `capturando`: Faltan datos (ej: falta la bodega).
-5. `confirmacion`: Resumen generado esperando "sí", "no" o correcciones.
+## 2. Arquitectura Técnica (¿Cómo funciona?)
 
-### C. Controles de Administrador
-- **ADMIN_PHONES**: Lista de números con permisos especiales definidos en `.env`.
-- **Comandos**:
-  - `bloquear [fecha]`: Impide registrar pedidos para un día específico.
-  - `desbloquear [fecha]`: Habilita la fecha nuevamente.
-- **Reporte Grupal**: Al escribir "pedido" en un grupo de WhatsApp, el bot envía un resumen consolidado de los pedidos cuya `fecha_entrega` es el día actual.
+El sistema utiliza una arquitectura de **Navegación Numérica Contextual**, diseñada para la máxima estabilidad en conexiones móviles.
 
-## 5. Estructura de Datos (Tablas Clave)
-- `usuarios`: `telefono`, `nombre`, `estado`.
-- `pedidos`: `cliente`, `precio` (total), `bodega`, `metodo_envio`, `productos` (texto formateado), `fecha_entrega`.
-- `fechas_bloqueadas`: `fecha` (DATE).
+### 🏗️ Stack Tecnológico
+*   **Motor Principal**: Python 3.10+ con **FastAPI**.
+*   **Cerebro (IA)**: **Groq (Llama-3)** para el procesamiento de lenguaje natural y extracción de datos estructurados (JSON).
+*   **Base de Datos**: **PostgreSQL** para la persistencia de usuarios, pedidos y estados.
+*   **Puerta de Enlace**: **Evolution API v2**, que gestiona la conexión con WhatsApp Web y la entrega de mensajes.
+*   **Infraestructura**: **Docker & Docker Compose** para asegurar que todo corra igual en cualquier servidor.
 
-## 6. Próximos Pasos (Hoja de Ruta)
-- **Base de Datos de Tiendas**: Crear tabla `tiendas` con `nombre`, `direccion`, `geolocalizacion` y `horarios`.
-- **Validación Geográfica**: Validar si la bodega seleccionada tiene cobertura para el método de envío elegido.
-- **Integración de Facturación**: Exportar pedidos confirmados a un sistema contable vía API.
+### 🔄 Máquina de Estados
+El bot no responde al azar; utiliza una máquina de estados finitos para saber en qué parte de la conversación está el usuario:
+1.  `capturando_nombre`: Primera interacción, esperando nombre del vendedor.
+2.  `menu:principal`: Navegación base.
+3.  `capturando`: La IA está procesando los datos del pedido.
+4.  `menu:confirmacion_pedido`: Esperando validación del resumen.
+5.  `menu:pedidos`: Exploración de historial.
+6.  `esperando_id_modificar`: Usuario seleccionó modificar y el bot espera el número del pedido.
 
-## 7. Instrucciones para la IA de Documentación
-Al analizar este código, prioriza siempre el archivo `services/pedido_service.py` para la lógica de flujo y `utils/parser_ia.py` para las reglas de extracción de precios y fechas. El sistema debe mantener la integridad de los precios unitarios en todo momento.
+### 🤖 Lógica de la IA (Fusión Inteligente)
+El sistema de IA está configurado para realizar **actualizaciones incrementales**. Si un usuario corrige un pedido diciendo *"son 2 unidades"*, la IA mantiene los productos anteriores, precios y cliente, modificando estrictamente lo que el usuario indicó.
+
+---
+
+## 3. Seguridad y Configuración
+*   **Acceso Restringido**: Solo los números autorizados o definidos en la lista de `ADMIN_PHONES` pueden interactuar con el bot.
+*   **Variables de Entorno**: Toda la configuración sensible (API Keys, URLs de DB, JID de Grupo) se gestiona mediante un archivo `.env` protegido.
+
+---
+
+## 4. Estructura de Archivos Clave
+*   `main.py`: Punto de entrada y receptor de Webhooks.
+*   `handlers/private.py`: El corazón de la lógica de menús y estados.
+*   `services/pedidos/creator.py`: Lógica de negocio para procesar, guardar y reportar pedidos.
+*   `utils/parser_ia.py`: Prompt Engineering para la comunicación con Llama-3.
+*   `models/`: Definición de consultas SQL para Pedidos y Usuarios.
