@@ -4,10 +4,12 @@ import os
 import re
 import time
 from dotenv import load_dotenv
+from utils.formato import formatear_precio
 
-load_dotenv()
+from config import config
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_API_KEY = config.GROQ_API_KEY
+IA_MODEL = config.IA_MODEL
 
 # Configuración de reintentos
 MAX_RETRIES = 2
@@ -23,7 +25,7 @@ def _limpiar_json(texto: str) -> str:
     return texto.strip()
 
 
-def _llamar_ia(prompt: str) -> str | None:
+def _llamar_ia(system_prompt: str, user_prompt: str) -> str | None:
     """Llama a Groq API con reintentos automáticos."""
     if not GROQ_API_KEY:
         print("WARN: GROQ_API_KEY no configurada. Crea una gratis en console.groq.com")
@@ -36,9 +38,10 @@ def _llamar_ia(prompt: str) -> str | None:
     }
     
     data = {
-        "model": "llama-3.3-70b-versatile", # Modelo mucho más potente y capaz
+        "model": IA_MODEL,
         "messages": [
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
         ],
         "temperature": 0.0,
         "response_format": {"type": "json_object"}
@@ -75,60 +78,97 @@ def interpretar_con_ia(texto: str, pedido_actual: dict = None) -> dict:
     Usa Groq para interpretar pedidos. Si se pasa pedido_actual, lo usa como contexto
     para no sobrescribir datos correctos con ambigüedades.
     """
-    contexto = ""
-    # Obtener fecha actual para referencia de la IA
-    from datetime import datetime, timedelta
+    from datetime import datetime
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
     nombre_dia_hoy = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"][datetime.now().weekday()]
 
-    contexto = ""
-    if pedido_actual:
-        contexto = f"""
-FECHA ACTUAL: {fecha_hoy} ({nombre_dia_hoy})
+    SYSTEM_PROMPT = """Eres un sistema experto en extracción estructurada de pedidos para "Laminados Beka", empresa especializada en láminas, formicas, pegantes y herrajes.
 
-CONTEXTO DEL PEDIDO ACTUAL (lo que ya sabemos):
-- Precio Total: {pedido_actual.get('precio') or 'Pendiente'}
-- Cliente: {pedido_actual.get('cliente') or 'Pendiente'}
-- Bodega: {pedido_actual.get('bodega') or 'Pendiente'}
-- Método Envío: {pedido_actual.get('metodo_envio') or 'Pendiente'}
-- Fecha Entrega: {pedido_actual.get('fecha_entrega') or 'Pendiente'}
-- Productos: {pedido_actual.get('productos') or 'Pendiente'}
+Tu única función es convertir mensajes de usuarios en JSON estructurado.
 
-El usuario está completando los datos faltantes o corrigiendo.
-"""
+REGLAS CRÍTICAS:
 
-    prompt = f"""Eres un experto en extracción de datos para "Laminados Beka", una empresa líder en venta de láminas, formicas, pegantes y herrajes. 
-{contexto}
+1. PRECIOS:
+- TODO número asociado a un producto es SIEMPRE precio_unitario.
+- NUNCA es precio total.
+- NUNCA dividas valores.
+- El total será calculado externamente.
 
-REGLAS DE PRECIO:
-1. ¡SIEMPRE ES VALOR UNITARIO!: Cualquier precio que el usuario mencione junto a un producto es el precio de UNA unidad.
-   Ejemplo: "3 laminas 200k" -> precio_unitario: 200000. (Total será 600000).
-2. NO DIVIDIR: Nunca intentes dividir el precio entre la cantidad.
-3. PRECIO TOTAL: El sistema calculará el total automáticamente multiplicando Cantidad x Precio Unitario.
+2. PRODUCTOS:
+- Extrae cada producto en una lista.
+- Si falta cantidad, asumir 1.
+- Si falta precio, usar 0.
 
-REGLAS DE FECHA:
-- Si dice "hoy", "mañana", "lunes", etc., calcula la fecha real basándote en que hoy es {fecha_hoy} ({nombre_dia_hoy}).
-- Formato: YYYY-MM-DD.
+3. FECHAS:
+- Convierte fechas relativas ("hoy", "mañana", "lunes") a formato YYYY-MM-DD.
+- Usa como referencia la fecha actual proporcionada.
+
+4. DATOS:
+- cliente → nombre de persona
+- bodega → ubicación o destino
+- metodo_envio → valores típicos: ruta, envio, recoger en tienda
+- fecha_entrega → fecha en formato YYYY-MM-DD
+
+5. CONTEXTO:
+- Si se proporciona información previa, NO sobrescribas datos correctos.
+- Solo completa o corrige lo necesario.
+
+6. SALIDA:
+- Responde ÚNICAMENTE con JSON válido.
+- No expliques nada.
+- No agregues texto adicional.
+
+FORMATO DE RESPUESTA:
+
+{
+  "cliente": string | null,
+  "bodega": string | null,
+  "metodo_envio": string | null,
+  "fecha_entrega": string | null,
+  "lista_productos": [
+    {
+      "cantidad": number,
+      "descripcion": string,
+      "precio_unitario": number
+    }
+  ]
+}"""
+
+    USER_PROMPT = f"""FECHA ACTUAL: {fecha_hoy} ({nombre_dia_hoy})
+
+CONTEXTO DEL PEDIDO ACTUAL:
+- cliente: {pedido_actual.get('cliente') if pedido_actual else None}
+- bodega: {pedido_actual.get('bodega') if pedido_actual else None}
+- metodo_envio: {pedido_actual.get('metodo_envio') if pedido_actual else None}
+- fecha_entrega: {pedido_actual.get('fecha_entrega') if pedido_actual else None}
+- productos: {pedido_actual.get('productos') if pedido_actual else None}
 
 EJEMPLOS:
-- "Jhon, 3 laminas 300k, Soacha, ruta, para el lunes"
-  -> {{"cliente": "Jhon", "bodega": "Soacha", "metodo_envio": "ruta", "fecha_entrega": "YYYY-MM-DD (del lunes)", "lista_productos": [{{"cantidad": 3, "descripcion": "laminas", "precio_unitario": 100000}}]}}
 
-NUEVO MENSAJE: "{texto}"
+Input: "3 laminas 200k soacha mañana"
+Output:
+{{"cliente": null, "bodega": "Soacha", "metodo_envio": null, "fecha_entrega": "YYYY-MM-DD", "lista_productos":[{{"cantidad":3,"descripcion":"laminas","precio_unitario":200000}}]}}
 
-Responde SOLO el JSON:
-{{
-  "cliente": string|null,
-  "bodega": string|null,
-  "metodo_envio": string|null,
-  "fecha_entrega": string|null,
-  "lista_productos": [
-    {{"cantidad": number, "descripcion": string, "precio_unitario": number}}
-  ]
-}}
-"""
+Input: "Pedro 5 formicas 150000 ruta hoy"
+Output:
+{{"cliente":"Pedro","bodega":null,"metodo_envio":"ruta","fecha_entrega":"YYYY-MM-DD","lista_productos":[{{"cantidad":5,"descripcion":"formicas","precio_unitario":150000}}]}}
 
-    raw = _llamar_ia(prompt)
+Input: "2 laminas"
+Output:
+{{"cliente":null,"bodega":null,"metodo_envio":null,"fecha_entrega":null,"lista_productos":[{{"cantidad":2,"descripcion":"laminas","precio_unitario":0}}]}}
+
+Input: "para el lunes 3 laminas 100k"
+Output:
+{{"cliente":null,"bodega":null,"metodo_envio":null,"fecha_entrega":"YYYY-MM-DD","lista_productos":[{{"cantidad":3,"descripcion":"laminas","precio_unitario":100000}}]}}
+
+Input: "10 pegantes 50k cada uno enviar"
+Output:
+{{"cliente":null,"bodega":null,"metodo_envio":"envio","fecha_entrega":null,"lista_productos":[{{"cantidad":10,"descripcion":"pegantes","precio_unitario":50000}}]}}
+
+MENSAJE DEL USUARIO:
+"{texto}" """
+
+    raw = _llamar_ia(SYSTEM_PROMPT, USER_PROMPT)
     if not raw:
         return {"precio": None, "cliente": None, "bodega": None, "metodo_envio": None, "fecha_entrega": None, "productos": None}
 
@@ -258,37 +298,119 @@ def detectar_modificacion(texto: str, pedido_actual: dict) -> dict:
     if texto_lower in _PALABRAS_CANCELAR:
         return {"accion": "cancelar"}
 
-    # Segundo: intentar con IA
-    prompt = f"""Eres un experto en corregir pedidos para "Laminados Beka" (especialistas en láminas y formicas). 
-HOY ES: {datetime.now().strftime("%Y-%m-%d")}
+    from datetime import datetime
+    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
+    dia_semana = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"][datetime.now().weekday()]
+
+    system_prompt = """Eres un sistema experto en análisis y corrección de pedidos para "Laminados Beka".
+
+Tu función es interpretar si el usuario quiere:
+1. confirmar el pedido
+2. cancelar el pedido
+3. modificar el pedido
+
+REGLAS CRÍTICAS:
+
+1. INTENCIÓN:
+- "sí", "ok", "listo", "confirmar" → confirmar
+- "no", "cancelar", "anular" → cancelar
+- cualquier cambio en datos → modificar
+
+2. MODIFICACIONES:
+- SOLO devuelve los campos que cambian
+- NO repitas datos que no cambian
+- Si no hay cambios claros → accion = "desconocido"
+
+3. PRODUCTOS:
+- Tu objetivo es una FUSIÓN INTELIGENTE.
+- Si el usuario menciona un cambio en un producto (ej: "son 2"), busca ese producto en el PEDIDO ACTUAL y actualiza su cantidad o precio.
+- MANTÉN todos los demás productos que estaban en el pedido previo. NUNCA los elimines a menos que el usuario diga "quita", "borra" o "elimina".
+- Devuelve SIEMPRE la lista de productos COMPLETA resultante de la fusión.
+
+4. PRECIOS:
+- TODO número asociado a producto es SIEMPRE precio_unitario
+- NUNCA es total
+- NUNCA dividir valores
+
+5. FECHAS:
+- Convierte fechas relativas a formato YYYY-MM-DD
+
+6. CONSERVACIÓN:
+- No inventes datos
+- Si no estás seguro → devuelve null
+
+7. SALIDA:
+- Responde SOLO JSON válido
+- Sin texto adicional
+
+FORMATO:
+
+{
+  "accion": "confirmar" | "cancelar" | "modificar" | "desconocido",
+  "cliente": string | null,
+  "bodega": string | null,
+  "metodo_envio": string | null,
+  "fecha_entrega": string | null,
+  "lista_productos": [
+    {
+      "cantidad": number,
+      "descripcion": string,
+      "precio_unitario": number
+    }
+  ] | null
+}"""
+
+    user_prompt = f"""FECHA ACTUAL: {fecha_hoy} ({dia_semana})
 
 PEDIDO ACTUAL:
-- Cliente: {pedido_actual.get('cliente')}
-- Productos: {pedido_actual.get('productos')}
-- Fecha actual del pedido: {pedido_actual.get('fecha_entrega')}
+- cliente: {pedido_actual.get('cliente')}
+- bodega: {pedido_actual.get('bodega')}
+- metodo_envio: {pedido_actual.get('metodo_envio')}
+- fecha_entrega: {pedido_actual.get('fecha_entrega')}
+- productos: {pedido_actual.get('productos')}
 
-MENSAJE DEL USUARIO: "{texto}"
+EJEMPLOS:
 
-REGLAS:
-1. SI MODIFICA PRODUCTOS: Devuelve la lista COMPLETA de productos actualizada en 'lista_productos'.
-2. PRECIOS: ¡SIEMPRE ES VALOR UNITARIO! Si dice "3 laminas 100k", el precio unitario es 100000.
-3. FECHA: Si el usuario menciona una nueva fecha (ej: "para el lunes"), devuélvela en 'fecha_entrega'.
-4. SOLO CAMBIOS: Devuelve valor SOLO para los campos que cambian. El resto null.
+Input: "sí"
+Output:
+{{"accion":"confirmar","cliente":null,"bodega":null,"metodo_envio":null,"fecha_entrega":null,"lista_productos":null}}
 
-Responde SOLO el JSON:
-{{
-  "accion": "confirmar" | "cancelar" | "modificar",
-  "cliente": string|null,
-  "bodega": string|null,
-  "metodo_envio": string|null,
-  "fecha_entrega": string|null,
-  "lista_productos": [
-    {{"cantidad": number, "descripcion": string, "precio_unitario": number}}
-  ] | null
-}}
-"""
+Input: "cancelar"
+Output:
+{{"accion":"cancelar","cliente":null,"bodega":null,"metodo_envio":null,"fecha_entrega":null,"lista_productos":null}}
 
-    raw = _llamar_ia(prompt)
+Input: "cambia la fecha para mañana"
+Output:
+{{"accion":"modificar","cliente":null,"bodega":null,"metodo_envio":null,"fecha_entrega":"YYYY-MM-DD","lista_productos":null}}
+
+Input: "envio en vez de ruta"
+Output:
+{{"accion":"modificar","cliente":null,"bodega":null,"metodo_envio":"envio","fecha_entrega":null,"lista_productos":null}}
+
+Input: "ahora son 5 laminas 200k"
+Output:
+{{"accion":"modificar","cliente":null,"bodega":null,"metodo_envio":null,"fecha_entrega":null,"lista_productos":[{{"cantidad":5,"descripcion":"laminas","precio_unitario":200000}}]}}
+
+Input: "es para soacha"
+Output:
+{{"accion":"modificar","cliente":null,"bodega":"Soacha","metodo_envio":null,"fecha_entrega":null,"lista_productos":null}}
+
+Input: "todo bien"
+Output:
+{{"accion":"confirmar","cliente":null,"bodega":null,"metodo_envio":null,"fecha_entrega":null,"lista_productos":null}}
+
+Input: "son 2 laminas" (Contexto previo tiene: 1 lamina y 5 pegantes)
+Output:
+{"accion":"modificar","cliente":null,"bodega":null,"metodo_envio":null,"fecha_entrega":null,"lista_productos":[{"cantidad":2,"descripcion":"laminas","precio_unitario":100000},{"cantidad":5,"descripcion":"pegantes","precio_unitario":50000}]}
+
+Input: "no, mejor 3 laminas 150k y para el lunes"
+Output:
+{{"accion":"modificar","cliente":null,"bodega":null,"metodo_envio":null,"fecha_entrega":"YYYY-MM-DD","lista_productos":[{{"cantidad":3,"descripcion":"laminas","precio_unitario":150000}}]}}
+
+MENSAJE DEL USUARIO:
+"{texto}" """
+
+    raw = _llamar_ia(system_prompt, user_prompt)
     if raw:
         try:
             result = json.loads(_limpiar_json(raw))
@@ -323,7 +445,8 @@ def extraer_fecha_con_ia(texto: str) -> str | None:
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
     nombre_dia_hoy = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"][datetime.now().weekday()]
 
-    prompt = f"""Extrae la fecha mencionada en el siguiente texto y devuélvela en formato YYYY-MM-DD.
+    system_prompt = "Eres un experto en extracción de fechas para Laminados Beka. Responde ÚNICAMENTE con JSON."
+    user_prompt = f"""Extrae la fecha mencionada en el siguiente texto y devuélvela en formato YYYY-MM-DD.
 HOY ES: {fecha_hoy} ({nombre_dia_hoy})
 
 TEXTO: "{texto}"
@@ -331,7 +454,7 @@ TEXTO: "{texto}"
 Responde SOLO el JSON:
 {{"fecha": "YYYY-MM-DD" | null}}
 """
-    raw = _llamar_ia(prompt)
+    raw = _llamar_ia(system_prompt, user_prompt)
     if raw:
         try:
             result = json.loads(_limpiar_json(raw))

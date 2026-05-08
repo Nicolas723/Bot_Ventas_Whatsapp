@@ -1,43 +1,65 @@
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import os
-from dotenv import load_dotenv
+from contextlib import contextmanager
+from config import config
 
-load_dotenv()
-
-# Configuración de la base de datos (Priorizar DATABASE_URL si existe)
-DATABASE_URL = os.getenv("DATABASE_URL")
+@contextmanager
+def get_db_conn():
+    """Context manager para conexiones PostgreSQL."""
+    conn = None
+    try:
+        if config.DATABASE_URL:
+            conn = psycopg2.connect(config.DATABASE_URL, cursor_factory=RealDictCursor)
+        else:
+            conn = psycopg2.connect(
+                host=config.DB_HOST,
+                user=config.DB_USER,
+                password=config.DB_PASSWORD,
+                database=config.DB_NAME,
+                port=config.DB_PORT,
+                cursor_factory=RealDictCursor
+            )
+        conn.autocommit = True
+        yield conn
+    except Exception as e:
+        print(f"Error de base de datos: {e}")
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if conn:
+            conn.close()
 
 def get_connection():
-    """Retorna una conexión a la base de datos PostgreSQL (Supabase)."""
-    if DATABASE_URL:
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-        conn.autocommit = True
-        return conn
-    
-    conn = psycopg2.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD", ""),
-        database=os.getenv("DB_NAME", "postgres"),
-        port=os.getenv("DB_PORT", "5432"),
-        cursor_factory=RealDictCursor
-    )
+    """Mantenido por compatibilidad legacy pero usa config."""
+    if config.DATABASE_URL:
+        conn = psycopg2.connect(config.DATABASE_URL, cursor_factory=RealDictCursor)
+    else:
+        conn = psycopg2.connect(
+            host=config.DB_HOST,
+            user=config.DB_USER,
+            password=config.DB_PASSWORD,
+            database=config.DB_NAME,
+            port=config.DB_PORT,
+            cursor_factory=RealDictCursor
+        )
     conn.autocommit = True
     return conn
 
 def init_db():
-    """Crea las tablas necesarias si no existen (Sintaxis PostgreSQL)."""
-    conn = get_connection()
-    conn.autocommit = True
-    try:
+    """Inicialización de tablas (Sintaxis PostgreSQL)."""
+    with get_db_conn() as conn:
         with conn.cursor() as cursor:
             # Tabla Usuarios
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS usuarios (
-                    id SERIAL PRIMARY KEY,
-                    telefono VARCHAR(20) UNIQUE NOT NULL,
-                    estado VARCHAR(50) DEFAULT 'inicio'
+                    telefono TEXT PRIMARY KEY,
+                    nombre TEXT,
+                    rol TEXT DEFAULT 'vendedor',
+                    autorizado BOOLEAN DEFAULT FALSE,
+                    estado TEXT DEFAULT 'nuevo',
+                    contexto_lista JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
@@ -45,11 +67,16 @@ def init_db():
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS pedidos (
                     id SERIAL PRIMARY KEY,
-                    telefono VARCHAR(20) NOT NULL,
+                    telefono TEXT NOT NULL,
                     precio DECIMAL(20, 2),
-                    tienda VARCHAR(100),
-                    origen VARCHAR(100),
-                    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    cliente TEXT,
+                    bodega TEXT,
+                    metodo_envio TEXT,
+                    productos TEXT,
+                    fecha_entrega DATE,
+                    estado TEXT DEFAULT 'pendiente',
+                    fecha_entregado TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             
@@ -59,30 +86,62 @@ def init_db():
                     telefono VARCHAR(20) PRIMARY KEY,
                     precio DECIMAL(20, 2),
                     tienda VARCHAR(100),
-                    origen VARCHAR(100)
+                    origen VARCHAR(100),
+                    metodo_envio VARCHAR(50),
+                    productos TEXT,
+                    cliente VARCHAR(255),
+                    bodega VARCHAR(100),
+                    fecha_entrega DATE
                 )
             """)
             
-            # ── Migraciones: agregar columnas nuevas (safe) ──
+            # Migraciones y ajustes de columnas
             cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nombre VARCHAR(100)")
-            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS metodo_envio VARCHAR(50)")
-            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS metodo_envio VARCHAR(50)")
-            
-            # Nuevas columnas para la estructura solicitada
-            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS productos TEXT")
-            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS cliente VARCHAR(255)")
-            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS bodega VARCHAR(100)")
-            
-            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS productos TEXT")
-            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS cliente VARCHAR(255)")
-            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS bodega VARCHAR(100)")
-            
-            # Asegurar que la columna 'precio' existe y tiene mayor precisión
-            cursor.execute("ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS precio DECIMAL(20, 2)")
-            cursor.execute("ALTER TABLE pedidos_temp ADD COLUMN IF NOT EXISTS precio DECIMAL(20, 2)")
-            
-            # Forzar cambio de tipo si ya existe
-            cursor.execute("ALTER TABLE pedidos ALTER COLUMN precio TYPE DECIMAL(20, 2)")
-            cursor.execute("ALTER TABLE pedidos_temp ALTER COLUMN precio TYPE DECIMAL(20, 2)")
-    finally:
-        conn.close()
+            cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS rol VARCHAR(20) DEFAULT 'vendedor'")
+            cursor.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS autorizado BOOLEAN DEFAULT FALSE")
+
+            # Tablas de Catálogo
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS productos (
+                    id SERIAL PRIMARY KEY,
+                    nombre VARCHAR(255) UNIQUE NOT NULL,
+                    alias TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS bodegas (
+                    id SERIAL PRIMARY KEY,
+                    nombre VARCHAR(100) UNIQUE NOT NULL,
+                    alias TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS metodos_envio (
+                    id SERIAL PRIMARY KEY,
+                    nombre VARCHAR(100) UNIQUE NOT NULL,
+                    alias TEXT
+                )
+            """)
+
+            # Historial y Otros
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS historial_pedidos (
+                    id SERIAL PRIMARY KEY,
+                    pedido_id INT,
+                    datos_previos JSONB,
+                    fecha_modificacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    modificado_por VARCHAR(20)
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS contexto_grupos (
+                    jid VARCHAR(100) PRIMARY KEY,
+                    lista_pedidos_ids INT[]
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS fechas_bloqueadas (
+                    fecha DATE PRIMARY KEY
+                )
+            """)
+
